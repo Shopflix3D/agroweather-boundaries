@@ -1,0 +1,53 @@
+name: Update global boundaries (review required)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 4 * * 1'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: agroweather-boundaries-update
+  cancel-in-progress: false
+
+jobs:
+  check-and-propose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout boundaries repository
+        uses: actions/checkout@v4
+      - name: Configure Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check updater logic
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Detect and prepare reviewed updates
+        id: update
+        continue-on-error: true
+        run: python tools/update_boundaries.py --root . --max-updates 12
+      - name: Propose updates as a pull request (never publish directly)
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: 'data: propose geoBoundaries layer updates'
+          branch: 'automation/geoboundaries-review'
+          delete-branch: true
+          title: 'Review updated global administrative boundaries'
+          body: |
+            Automated proposal only; **do not merge without visual/topology and licensing review**.
+            Includes modified country layers, manifest generation timestamp, and attribution metadata.
+            Confirm ADM boundaries, antimeridian artifacts, crossing lines and per-layer license before merge.
+          add-paths: |
+            countries/**
+            manifest.json
+            ATTRIBUTION.json
+      - name: Fail if provider validation encountered errors
+        if: steps.update.outcome == 'failure'
+        run: |
+          echo 'Updater had errors; inspect the job summary and PR before merging.'
+          exit 1
